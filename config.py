@@ -43,6 +43,16 @@ class PlainTextKickerConfig(BaseConfig):
             ),
         )
 
+        intercept_tool_calls_with_text: bool = Field(
+            default=True,
+            description=(
+                "模型同时输出回复文本与其它工具调用时，是否把该文本作为回复"
+                "补发出去（方案 B）。典型场景是 kfc_reply 收到空 content"
+                "（执行层判为工具失败），正文既不被执行也发不出去。"
+                "关闭后此类响应完全交回 chatter 处理"
+            ),
+        )
+
         max_text_length: int = Field(
             default=4096,
             description="单次发送文本的最大字符数，超过则截断",

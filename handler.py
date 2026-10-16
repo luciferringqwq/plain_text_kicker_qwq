@@ -4,9 +4,18 @@
 直接通过 send_api 发送，并注入假的 action-do_nothing 工具调用以阻止
 chatter（如 KFC）因 call_list 为空而触发纯文本重试循环。
 
-另外覆盖「回复文本 + action-do_nothing」的组合：部分模型会把回复写进
-message，却又调用 do_nothing 表示沉默。此时 chatter 只执行工具调用，
-message 会被静默丢弃，因此这里同样把文本发送出去（可由配置关闭）。
+共覆盖三类「正文会被静默丢弃」的响应：
+
+1. **纯文本**：``message`` 有正文、``tool_calls`` 为空；
+2. **文本 + do_nothing**：模型把回复写进 message，却又调用 ``do_nothing``
+   表示沉默，chatter 只执行工具调用，正文被丢弃；
+3. **文本 + 其它工具调用**：模型同时给出正文与真实工具调用（例如
+   ``kfc_reply`` 收到空 ``content``，执行层判「content 解析后为空，
+   视为工具失败」），chatter 只认工具调用，正文同样被丢弃。
+
+前两类发送后用假 ``action-do_nothing`` 整体替换 ``tool_calls``，阻止
+chatter 重试；第 3 类只补发正文，``tool_calls`` 原样交回 chatter 执行。
+第 3 类可用 ``intercept_tool_calls_with_text`` 关闭。
 
 stream_id 通过 meta_data 或 chatter_manager 反向查找获取，
 兼容未在 LLMRequest.meta_data 中设置 stream_id 的 chatter（如 kokoro_flow_chatter）。
@@ -28,6 +37,14 @@ from src.kernel.event import EventDecision
 
 logger = get_logger("plain_text_kicker")
 
+MODE_PLAIN_TEXT = "plain_text"
+"""纯文本模式：message 有正文、tool_calls 为空。"""
+
+MODE_SILENCE_WITH_TEXT = "silence_with_text"
+"""文本 + do_nothing 模式：沉默决策里夹带了正文。"""
+
+MODE_TOOL_CALLS_WITH_TEXT = "tool_calls_with_text"
+"""文本 + 其它工具调用模式：正文与真实工具调用并存。"""
 
 
 class PlainReplyHandler(BaseEventHandler):
@@ -63,12 +80,14 @@ class PlainReplyHandler(BaseEventHandler):
     ) -> tuple[EventDecision, dict[str, Any]]:
         """处理 AFTER_LLM_REQUEST 事件。
 
-        检测以下两类响应并直接发送其中的文本：
+        检测以下三类响应并直接发送其中的文本：
 
         1. 纯文本 + 无 tool_calls；
-        2. 文本 + 仅含 ``action-do_nothing`` 的工具调用（沉默决策）。
+        2. 文本 + 仅含 ``action-do_nothing`` 的工具调用（沉默决策）；
+        3. 文本 + 其它工具调用。
 
-        发送后统一用假 ``action-do_nothing`` 替换 tool_calls，避免 chatter 重试。
+        前两类发送后把 ``tool_calls`` 整体替换为假 ``action-do_nothing``，
+        第 3 类只补发正文、``tool_calls`` 原样保留。
         stream_id 来源优先级：meta_data → chatter_manager 反向查找。
         """
         # ── AFTER_LLM_REQUEST：拦截纯文本 ──
@@ -78,7 +97,7 @@ class PlainReplyHandler(BaseEventHandler):
 
         # 1. 提取关键字段
         message = params.get("message")
-        tool_calls = params.get("tool_calls", [])
+        tool_calls = list(params.get("tool_calls") or [])
         request_name = str(params.get("request_name") or "")
         meta_data = params.get("meta_data") or {}
 
@@ -87,34 +106,40 @@ class PlainReplyHandler(BaseEventHandler):
         if not stream_id:
             stream_id = self._lookup_stream_id_by_request(request_name)
 
-        silence_with_text = self._is_silence_only(tool_calls)
+        silence_only = self._is_silence_only(tool_calls)
+        mode = self._resolve_mode(
+            message=message,
+            tool_calls=tool_calls,
+            silence_only=silence_only,
+            request_name=request_name,
+            stream_id=stream_id,
+            config=config,
+        )
 
         if config.debug_log:
             logger.info(
                 f"[plain_text_kicker] AFTER_LLM_REQUEST "
                 f"req={request_name} "
                 f"msg={bool(message)} "
-                f"tc={len(tool_calls) if tool_calls else 0} "
-                f"silence_only={silence_with_text} "
+                f"tc={len(tool_calls)} "
+                f"mode={mode or 'SKIP'} "
                 f"sid={'...'+stream_id[-8:] if stream_id else 'NONE'}"
             )
 
         # 2. 过滤
-        if not self._should_intercept(
-            message, tool_calls, request_name, stream_id, config
-        ):
+        if mode is None:
             return EventDecision.SUCCESS, params
 
         text = str(message).strip()
 
-        # 3. 去重
+        # 3. 去重（命中时不再发送，但仍按模式收口工具调用）
         if config.enable_dedup and self._is_duplicate(stream_id, text):
             if config.debug_log:
                 logger.debug(
                     f"[plain_text_kicker] 去重跳过 stream={stream_id[:8]} "
                     f"text_len={len(text)}"
                 )
-            params["tool_calls"] = self._build_silence_call_list()
+            params["tool_calls"] = self._rewrite_tool_calls(mode, tool_calls)
             return EventDecision.SUCCESS, params
 
         # 4. 截断
@@ -129,10 +154,16 @@ class PlainReplyHandler(BaseEventHandler):
             success = False
 
         if success:
-            if silence_with_text:
+            if mode == MODE_SILENCE_WITH_TEXT:
                 logger.info(
                     f"[plain_text_kicker] 文本与 do_nothing 同时出现，"
                     f"已按回复发送 stream={stream_id[:8]} len={len(text)}"
+                )
+            elif mode == MODE_TOOL_CALLS_WITH_TEXT:
+                logger.info(
+                    f"[plain_text_kicker] 文本与工具调用并存，"
+                    f"已按回复发送 stream={stream_id[:8]} len={len(text)} "
+                    f"调用列表={[self._call_name(c) for c in tool_calls]}"
                 )
             elif config.debug_log:
                 logger.debug(
@@ -143,8 +174,8 @@ class PlainReplyHandler(BaseEventHandler):
         else:
             logger.warning(f"[plain_text_kicker] 发送失败 stream={stream_id[:8]}")
 
-        # 6. 注入假 do_nothing 以阻止 chatter 重试（保留 message 以确保上下文连贯）
-        params["tool_calls"] = self._build_silence_call_list()
+        # 6. 改写工具调用：前两类注入假 do_nothing 阻止 chatter 重试
+        params["tool_calls"] = self._rewrite_tool_calls(mode, tool_calls)
 
         return EventDecision.SUCCESS, params
 
@@ -153,34 +184,66 @@ class PlainReplyHandler(BaseEventHandler):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _should_intercept(
+    def _resolve_mode(
+        *,
         message: Any,
-        tool_calls: Any,
+        tool_calls: list[Any],
+        silence_only: bool,
         request_name: str,
         stream_id: str,
         config: Any,
-    ) -> bool:
-        """判断是否应该拦截当前 LLM 响应。
+    ) -> str | None:
+        """判断当前响应属于哪种可拦截模式，不可拦截时返回 ``None``。
 
-        除「纯文本 + 无工具调用」外，也拦截「文本 + 仅 do_nothing」：
-        模型写了回复却又选择沉默时，chatter 只会执行工具调用，
-        文本会被丢弃，因此这里补一次发送。
+        Args:
+            message: 模型输出的正文。
+            tool_calls: 模型输出的工具调用列表。
+            silence_only: 工具调用是否非空且全部为 ``do_nothing``。
+            request_name: LLM 请求名。
+            stream_id: 聊天流 ID。
+            config: 本插件 main 配置节。
+
+        Returns:
+            str | None: 命中的模式常量，未命中为 ``None``。
         """
         if not message or not isinstance(message, str) or not message.strip():
-            return False
-        if tool_calls and len(tool_calls) > 0:
-            # 仅在工具调用全部为 do_nothing（且配置允许）时继续拦截，
-            # 其余工具调用交给 chatter 正常执行。
-            if not PlainReplyHandler._is_silence_only(tool_calls):
-                return False
-            if not getattr(config, "intercept_silence_with_text", True):
-                return False
-        if not stream_id:
-            return False
-        if not request_name:
-            return False
+            return None
+        if not stream_id or not request_name:
+            return None
         patterns = config.request_name_patterns or ["*"]
-        return any(fnmatch.fnmatch(request_name, p) for p in patterns)
+        if not any(fnmatch.fnmatch(request_name, p) for p in patterns):
+            return None
+
+        if not tool_calls:
+            return MODE_PLAIN_TEXT
+
+        if silence_only:
+            if not getattr(config, "intercept_silence_with_text", True):
+                return None
+            return MODE_SILENCE_WITH_TEXT
+
+        # 正文与真实工具调用并存：补发正文，工具调用交回 chatter
+        if not getattr(config, "intercept_tool_calls_with_text", True):
+            return None
+        return MODE_TOOL_CALLS_WITH_TEXT
+
+    def _rewrite_tool_calls(self, mode: str, tool_calls: list[Any]) -> list[Any]:
+        """按拦截模式改写 ``tool_calls``。
+
+        纯文本与「文本 + do_nothing」两种模式整体替换为假
+        ``action-do_nothing``，让 chatter 自然收口而不重试；
+        「文本 + 其它工具调用」模式原样保留，交给 chatter 正常执行。
+
+        Args:
+            mode: ``_resolve_mode`` 返回的模式常量。
+            tool_calls: 原始工具调用列表。
+
+        Returns:
+            list[Any]: 改写后的工具调用列表。
+        """
+        if mode == MODE_TOOL_CALLS_WITH_TEXT:
+            return tool_calls
+        return self._build_silence_call_list()
 
     @staticmethod
     def _is_silence_only(tool_calls: Any) -> bool:
@@ -192,13 +255,19 @@ class PlainReplyHandler(BaseEventHandler):
         if not tool_calls:
             return False
         for call in tool_calls:
-            name = getattr(call, "name", None)
-            if name is None and isinstance(call, dict):
-                name = call.get("name")
-            normalized = str(name or "").replace(":", "-").rsplit("-", 1)[-1]
+            name = PlainReplyHandler._call_name(call)
+            normalized = name.replace(":", "-").rsplit("-", 1)[-1]
             if normalized != "do_nothing":
                 return False
         return True
+
+    @staticmethod
+    def _call_name(call: Any) -> str:
+        """取工具调用名，兼容 ``ToolCall`` 对象与 dict。"""
+        name = getattr(call, "name", None)
+        if name is None and isinstance(call, dict):
+            name = call.get("name")
+        return str(name or "")
 
     @staticmethod
     def _hash_content(text: str) -> str:
@@ -246,7 +315,7 @@ class PlainReplyHandler(BaseEventHandler):
         """
         return [{
             "id": "plain_reply_silence",
-            "name": "action-do_nothing",
+            "name": "action-do-nothing",
             "args": {},
         }]
 
