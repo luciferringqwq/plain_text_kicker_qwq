@@ -71,7 +71,21 @@ KFC 执行层识别 `action-do_nothing` → 设置 `has_do_nothing=True` → `co
 
 **第三类（方案 B）不做任何替换**：只把正文补发出去，`tool_calls` 原样交回 chatter 正常执行——换装、发表情等调用不会被吞掉。可用 `intercept_tool_calls_with_text = false` 关闭。
 
-注意：该模式只看「正文非空 + 存在非 `do_nothing` 调用」，**不检查工具调用自己是否已经带了文本**。若模型既在正文里写了话、又给 `kfc_reply` 传了正常 `content`，正文与工具内容会各发一条。这是刻意的简单实现；如需「工具已带文本就不重复补发」的保护，需要再加判断。
+**正常消息只发一次（去重保护）：**
+
+补发前会检查是否存在**已自带非空文本的回复类调用**。命中说明这条消息本来就会由该工具发给用户，插件便不再补发，避免双份：
+
+| 响应形态 | 结果 |
+|----------|------|
+| 正文「你好」+ `kfc_reply(content=["你好"])` | 工具自己发 → 插件跳过，**1 条** |
+| 正文「我在呢」+ `kfc_reply(content="")` | 工具发不出 → 插件补发，**1 条** |
+| 正文「看这个」+ `share_visual(visual_id)` | 视觉调用不发文本 → 插件补发，**1 条** |
+| 正文「记住」+ `kfc_memo(content="…")` | 备忘只存不发 → 插件补发，**1 条** |
+
+判定分两步，避免误伤：
+
+1. **调用名**必须命中 `TEXT_SENDING_CALL_PATTERNS`（`*kfc_reply*` / `*send_text*` / `*send_message*` / `*reply*`）。像 `kfc_memo` 这种只是把文本存起来、并不发给用户的动作，**即使参数同样叫 `content` 也不算**——否则模型「写正文 + 记备忘」时正文会被吞掉。
+2. 该调用的**文本参数**确实非空。参数名取 `TEXT_ARG_KEYS`（`content` / `text` / `message` / `segments` / `msg` / `reply` / `reply_text` / `texts`），判定口径与 KFC 的 `parse_content_segments` 一致（列表逐项取字符串、JSON 数组字符串二次解析）。
 
 ## 兼容性
 
@@ -80,6 +94,13 @@ KFC 执行层识别 `action-do_nothing` → 设置 `has_do_nothing=True` → `co
 - **其他基于 `AFTER_LLM_REQUEST` 的 chatter**：理论兼容
 
 ## 更新日志
+
+### v1.1.1 (2026-10-16)
+
+- **修复**：方案 B 会导致正常消息发两遍。原先只判断「正文非空 + 有工具调用」，于是模型既在正文写了话、又给 `kfc_reply` 传了正常 `content` 时，正文与工具内容会各发一条。
+- **新增去重保护**：补发前检查是否存在「已自带非空文本的回复类调用」（调用名命中 `TEXT_SENDING_CALL_PATTERNS`，且 `TEXT_ARG_KEYS` 里有非空文本）。命中则跳过补发，由工具发送，正常消息只发一次。
+- **不误伤**：`kfc_memo` 等只消费文本、不发给用户的动作，虽然参数同样叫 `content`，也不计入判定，模型「写正文 + 记备忘」时正文照常补发。
+- **日志**：`debug_log` 开启时输出 `reply_call_has_text` 字段；因该保护跳过时输出一条 debug 说明。
 
 ### v1.1.0 (2026-10-15)
 

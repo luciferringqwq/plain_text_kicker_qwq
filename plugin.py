@@ -26,7 +26,7 @@ class PlainTextKickerPlugin(BasePlugin):
         "（如 kfc_reply 空 content）时补发该文本，"
         "注入虚假 action-do_nothing 阻止 chatter 重试循环"
     )
-    plugin_version: str = "1.1.0"
+    plugin_version: str = "1.1.1"
 
     configs: list[type] = [PlainTextKickerConfig]
 
