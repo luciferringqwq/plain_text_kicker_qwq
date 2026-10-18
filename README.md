@@ -1,4 +1,4 @@
-# plain_text_kicker — 踹飞纯文本的插件
+# plain_text_kicker_qwq — 踹飞纯文本的插件
 
 在 `AFTER_LLM_REQUEST` 事件中截获模型非工具调用的纯文本输出，直接发送为聊天回复，并注入虚假 `action-do_nothing` 工具调用阻止 chatter 重试循环。
 
@@ -15,7 +15,7 @@ if not response.call_list:         # ← 没有 tool_call？
     continue                        #    回到循环顶重新请求 LLM
 ```
 
-`plain_text_kicker` 通过监听 `AFTER_LLM_REQUEST` 事件，在响应返回 chatter 之前直接发送纯文本，并用一个虚假的 `action-do_nothing` 调用替换空的 `call_list`，使 chatter 自然收口而不重试。
+`plain_text_kicker_qwq` 通过监听 `AFTER_LLM_REQUEST` 事件，在响应返回 chatter 之前直接发送纯文本，并用一个虚假的 `action-do_nothing` 调用替换空的 `call_list`，使 chatter 自然收口而不重试。
 
 另有一类丢消息场景：模型**同时**输出了回复正文和 `action-do_nothing`（`call_list` 非空）。此时 chatter 按工具调用执行沉默，正文被丢弃。本插件把「工具调用全是 `do_nothing`」也视为可拦截的纯文本回复，先把正文发出去，再用虚假 silence 调用替换掉原始 `do_nothing`，语义与正常纯文本兜底一致。
 
@@ -26,11 +26,11 @@ if not response.call_list:         # ← 没有 tool_call？
 | 模式 | 说明 | 侵入性 |
 |------|------|--------|
 | **EventHandler** | 自动监听 `AFTER_LLM_REQUEST`，无需 chatter 改动 | 零侵入 |
-| **Service** | 通过 `ServiceManager` 获取 `plain_text_kicker:text_reply`，chatter 显式调用 | 轻侵入 |
+| **Service** | 通过 `ServiceManager` 获取 `plain_text_kicker_qwq:text_reply`，chatter 显式调用 | 轻侵入 |
 
 ## 配置
 
-配置文件：`config/plugins/plain_text_kicker/config.toml`
+配置文件：`config/plugins/plain_text_kicker_qwq/config.toml`
 
 ```toml
 [main]
@@ -47,7 +47,7 @@ debug_log = false                       # 调试日志
 ## Service 用法示例
 
 ```python
-svc = service_manager.get_service("plain_text_kicker:text_reply")
+svc = service_manager.get_service("plain_text_kicker_qwq:text_reply")
 await svc.try_send("你好呀", stream_id="qq_123")
 ```
 
@@ -94,6 +94,11 @@ KFC 执行层识别 `action-do_nothing` → 设置 `has_do_nothing=True` → `co
 - **其他基于 `AFTER_LLM_REQUEST` 的 chatter**：理论兼容
 
 ## 更新日志
+
+### v1.1.2 (2026-10-18)
+
+- **修复（压缩包/市场版装不上）**：市场分发的 manifest 名为 `plain_text_kicker_qwq`，而代码里 `@register_plugin` 注册的 `plugin_name` 还是 `plain_text_kicker`。框架要求两者一致（`PluginManager` 用 `manifest.name` 去注册表取插件类），不一致时压缩包安装后直接报「插件类未注册（未使用 @register_plugin 装饰器）」，插件完全无法加载；源码文件夹方式因为 manifest 与代码同名才显得正常。现统一为 `plain_text_kicker_qwq`：插件名、配置目录（`config/plugins/plain_text_kicker_qwq/config.toml`）、Service ID（`plain_text_kicker_qwq:text_reply`）与日志前缀全部对齐。
+- **修复**：注入的假调用名由 `action-do-nothing` 改回 `action-do_nothing`。框架的动作调用名格式是 `action-<name>`（`src/core/components/base/action.py`），KFC 的 `normalize_call_name` 只剥离 `action-` / `tool-` / `agent-` 前缀，写成 `action-do-nothing` 会被归一化成 `do-nothing`：既不被识别为 KFC 控制动作（`has_do_nothing` 不置位），又会被当成第三方调用交给框架去执行一个不存在的 action，白白多一轮与一条失败告警。
 
 ### v1.1.1 (2026-10-16)
 

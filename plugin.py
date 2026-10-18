@@ -1,4 +1,4 @@
-"""plain_text_kicker 插件入口。
+"""plain_text_kicker_qwq 插件入口。
 
 在 LLM 输出非工具调用的纯文本时直接发送为回复，
 模型同时输出回复文本与 action-do_nothing 时同样发送该文本，
@@ -19,14 +19,14 @@ from .service import PlainReplyService
 class PlainTextKickerPlugin(BasePlugin):
     """踹飞纯文本插件。"""
 
-    plugin_name: str = "plain_text_kicker"
+    plugin_name: str = "plain_text_kicker_qwq"
     plugin_description: str = (
         "截获模型非工具调用的纯文本输出，直接发送为聊天回复；"
         "模型写了回复却又调用 do_nothing，或正文与工具调用并存"
         "（如 kfc_reply 空 content）时补发该文本，"
         "注入虚假 action-do_nothing 阻止 chatter 重试循环"
     )
-    plugin_version: str = "1.1.1"
+    plugin_version: str = "1.1.2"
 
     configs: list[type] = [PlainTextKickerConfig]
 

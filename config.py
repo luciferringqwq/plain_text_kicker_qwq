@@ -1,6 +1,6 @@
-"""plain_text_kicker 插件配置。
+"""plain_text_kicker_qwq 插件配置。
 
-配置文件默认路径：config/plugins/plain_text_kicker/config.toml
+配置文件默认路径：config/plugins/plain_text_kicker_qwq/config.toml
 """
 
 from __future__ import annotations

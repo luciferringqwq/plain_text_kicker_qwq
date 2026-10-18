@@ -41,7 +41,7 @@ from src.core.components.types import EventType
 from src.core.managers.chatter_manager import get_chatter_manager
 from src.kernel.event import EventDecision
 
-logger = get_logger("plain_text_kicker")
+logger = get_logger("plain_text_kicker_qwq")
 
 TEXT_ARG_KEYS: tuple[str, ...] = (
     "content",
@@ -153,7 +153,7 @@ class PlainReplyHandler(BaseEventHandler):
 
         if config.debug_log:
             logger.info(
-                f"[plain_text_kicker] AFTER_LLM_REQUEST "
+                f"[plain_text_kicker_qwq] AFTER_LLM_REQUEST "
                 f"req={request_name} "
                 f"msg={bool(message)} "
                 f"tc={len(tool_calls)} "
@@ -163,7 +163,7 @@ class PlainReplyHandler(BaseEventHandler):
             )
             if mode is None and reply_call_has_text:
                 logger.debug(
-                    "[plain_text_kicker] 回复类调用已自带文本，交由工具发送，跳过补发"
+                    "[plain_text_kicker_qwq] 回复类调用已自带文本，交由工具发送，跳过补发"
                 )
 
         # 2. 过滤
@@ -176,7 +176,7 @@ class PlainReplyHandler(BaseEventHandler):
         if config.enable_dedup and self._is_duplicate(stream_id, text):
             if config.debug_log:
                 logger.debug(
-                    f"[plain_text_kicker] 去重跳过 stream={stream_id[:8]} "
+                    f"[plain_text_kicker_qwq] 去重跳过 stream={stream_id[:8]} "
                     f"text_len={len(text)}"
                 )
             params["tool_calls"] = self._rewrite_tool_calls(mode, tool_calls)
@@ -190,29 +190,29 @@ class PlainReplyHandler(BaseEventHandler):
         try:
             success = await send_text(content=text, stream_id=stream_id)
         except Exception:
-            logger.exception(f"[plain_text_kicker] send_text 异常 stream={stream_id[:8]}")
+            logger.exception(f"[plain_text_kicker_qwq] send_text 异常 stream={stream_id[:8]}")
             success = False
 
         if success:
             if mode == MODE_SILENCE_WITH_TEXT:
                 logger.info(
-                    f"[plain_text_kicker] 文本与 do_nothing 同时出现，"
+                    f"[plain_text_kicker_qwq] 文本与 do_nothing 同时出现，"
                     f"已按回复发送 stream={stream_id[:8]} len={len(text)}"
                 )
             elif mode == MODE_TOOL_CALLS_WITH_TEXT:
                 logger.info(
-                    f"[plain_text_kicker] 文本与工具调用并存，"
+                    f"[plain_text_kicker_qwq] 文本与工具调用并存，"
                     f"已按回复发送 stream={stream_id[:8]} len={len(text)} "
                     f"调用列表={[self._call_name(c) for c in tool_calls]}"
                 )
             elif config.debug_log:
                 logger.debug(
-                    f"[plain_text_kicker] 已发送 stream={stream_id[:8]} "
+                    f"[plain_text_kicker_qwq] 已发送 stream={stream_id[:8]} "
                     f"len={len(text)} req={request_name}"
                 )
             self._mark_sent(stream_id, text, config)
         else:
-            logger.warning(f"[plain_text_kicker] 发送失败 stream={stream_id[:8]}")
+            logger.warning(f"[plain_text_kicker_qwq] 发送失败 stream={stream_id[:8]}")
 
         # 6. 改写工具调用：前两类注入假 do_nothing 阻止 chatter 重试
         params["tool_calls"] = self._rewrite_tool_calls(mode, tool_calls)
@@ -448,7 +448,7 @@ class PlainReplyHandler(BaseEventHandler):
         """
         return [{
             "id": "plain_reply_silence",
-            "name": "action-do-nothing",
+            "name": "action-do_nothing",
             "args": {},
         }]
 

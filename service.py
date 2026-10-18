@@ -10,7 +10,7 @@ from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.api.send_api import send_text
 from src.core.components.base.service import BaseService
 
-logger = get_logger("plain_text_kicker")
+logger = get_logger("plain_text_kicker_qwq")
 
 
 class PlainReplyService(BaseService):
@@ -21,7 +21,7 @@ class PlainReplyService(BaseService):
     调用 try_send() 将文本直接发送出去。
 
     Examples:
-        >>> svc = service_manager.get_service("plain_text_kicker:text_reply")
+        >>> svc = service_manager.get_service("plain_text_kicker_qwq:text_reply")
         >>> await svc.try_send("你好呀", stream_id="qq_123")
     """
     service_description = "直接发送纯文本回复的服务"
@@ -54,24 +54,24 @@ class PlainReplyService(BaseService):
         text = content.strip()
         if len(text) > max_length:
             text = text[:max_length]
-            logger.debug(f"[plain_text_kicker.text_reply] 截断到 {max_length} 字符")
+            logger.debug(f"[plain_text_kicker_qwq.text_reply] 截断到 {max_length} 字符")
 
         try:
             success = await send_text(content=text, stream_id=stream_id)
             if success:
                 logger.debug(
-                    f"[plain_text_kicker.text_reply] 已发送 "
+                    f"[plain_text_kicker_qwq.text_reply] 已发送 "
                     f"stream={stream_id[:8]} len={len(text)}"
                 )
             else:
                 logger.warning(
-                    f"[plain_text_kicker.text_reply] 发送失败 "
+                    f"[plain_text_kicker_qwq.text_reply] 发送失败 "
                     f"stream={stream_id[:8]}"
                 )
             return success
         except Exception:
             logger.exception(
-                f"[plain_text_kicker.text_reply] 发送异常 "
+                f"[plain_text_kicker_qwq.text_reply] 发送异常 "
                 f"stream={stream_id[:8]}"
             )
             return False
@@ -96,5 +96,5 @@ class PlainReplyService(BaseService):
         ok = await self.try_send(content, stream_id, max_length=max_length)
         if not ok:
             raise RuntimeError(
-                f"plain_text_kicker 发送失败 stream={stream_id[:8]}"
+                f"plain_text_kicker_qwq 发送失败 stream={stream_id[:8]}"
             )

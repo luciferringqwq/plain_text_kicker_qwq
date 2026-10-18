@@ -3,7 +3,7 @@
     "display_name": "踹飞纯文本的插件",
     "github_owner": "luciferringqwq",
     "github_repo": "plain_text_kicker_qwq",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "description": "在 AFTER_LLM_REQUEST 事件中截获模型非工具调用的纯文本输出，直接发送为聊天回复并注入虚假 action-do_nothing 阻止 chatter（如 KFC）重试。覆盖纯文本、文本+do_nothing、文本+其它工具调用（如 kfc_reply 空 content）三类丢文本场景。提供 EventHandler（事件拦截）与 Service（供 chatter 显式调用）双模式。",
     "author": "MoFox Team",
     "categories": [
